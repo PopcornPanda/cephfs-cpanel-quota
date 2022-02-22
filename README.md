@@ -11,7 +11,7 @@ Script is somehow optimized, it doesn't send a setxattr command if quota doesn't
 - Run pip/pip3 install -r /path/to/requirements.txt
 - Setup cron job for `cephfs-cpanel-quota`
 
-On test machine with ~1500 users it takes 8-12 seconds to run:
+On test machine with ~1500 users it takes 8-12 seconds to finish:
 ```
 real    0m8.865s
 user    0m1.090s
