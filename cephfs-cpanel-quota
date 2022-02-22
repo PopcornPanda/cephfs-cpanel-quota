@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+import os
+import re
+import xattr
+import shutil
+from json import dumps as j_dump
+from math import floor
+from pathlib import Path
+from configparser import SafeConfigParser
+
+config = SafeConfigParser(allow_no_value=True)
+config.read('/etc/ceph-quota.ini')
+
+
+def get_quota_dirs():
+    _dirs = []
+
+    for section in config.sections():
+        if '/' in section:
+            _dirs.append(section)
+
+    return _dirs
+
+
+def lift_quota(path):
+    xattr.setxattr(str(path), 'ceph.quota.max_bytes', bytes('0', 'ascii'))
+    xattr.setxattr(str(path), 'ceph.quota.max_files', bytes('0', 'ascii'))
+
+
+def set_quota(path, key, value):
+    xattr.setxattr(str(path), key, bytes(str(value), 'ascii'))
+
+
+def get_cpanel_value(value):
+    return value.split('=')[1].strip('\n')
+
+
+def file_owner_group(file_path):
+    return Path(file_path).group()
+
+
+def get_inodes(plan, quota):
+    if plan in config['plans']:
+        _inodes = config['plans'][plan]
+    else:
+        _inodes = floor(int(quota) * float(config['main']['inodes_modifier']))
+    return _inodes
+
+
+def save_quota_data(path, user):
+    _filename = '_Cpanel::Quota.pm__' + user['username']
+    _data_path = path + '/.cpanel/datastore/'
+    _quota_file = _data_path + _filename
+
+    if not os.path.isdir(_data_path):
+        os.makedirs(_data_path, mode=0o700, exist_ok=True)
+        shutil.chown(_data_path, user['username'], user['username'])
+
+    if not os.path.isfile(_quota_file):
+        Path(_quota_file).touch(mode=0o600, exist_ok=True)
+        shutil.chown(_quota_file, user['username'], user['username'])
+
+    _cur_b = int(xattr.getxattr(path, 'ceph.dir.rbytes'))
+    _cur_f = int(xattr.getxattr(path, 'ceph.dir.rentries'))
+    _m_b = int(user['quota_bytes'])
+    _m_f = int(user['inodes'])
+    _d_b = _m_b - _cur_b
+    _d_f = _m_f - _cur_f
+    _v = "VERSION"
+    _json = {"data": [_cur_b, _m_b, _d_b, _cur_f, _m_f, _d_f], _v: "2.4"}
+
+    try:
+        with open(_quota_file, 'w') as file_content:
+            file_content.write(j_dump(_json))
+
+    except IOError:
+        lift_quota(path)
+        with open(_quota_file, 'w') as file_content:
+            file_content.write(j_dump(_json))
+        set_quota(path, 'ceph.quota.max_bytes', _m_b)
+        set_quota(path, 'ceph.quota.max_files', _m_f)
+
+
+def collect_users_data():
+    users_list = []
+    try:
+        for user_file in os.listdir(config['main']['cpanel_user_dir']):
+            _user = {}
+            _user['username'] = user_file
+            full_path = config['main']['cpanel_user_dir'] + '/' + user_file
+
+            if file_owner_group(full_path) == _user['username']:
+                if _user['username'] in config['exclude']:
+                    _user['plan'] = 'SKIP'
+                    _user['quota'] = 0
+                    _user['quota_bytes'] = 0
+                    _user['inodes'] = 0
+
+                else:
+                    with open(full_path, 'r') as file_content:
+                        for line in file_content:
+
+                            if re.findall(r'^PLAN=', line):
+                                _user['plan'] = get_cpanel_value(line)
+
+                            if re.findall(r'^DISK_BLOCK_LIMIT=', line):
+                                _user['quota'] = get_cpanel_value(line)
+                                quota_in_bytes = int(_user['quota']) * 1024
+                                _user['quota_bytes'] = quota_in_bytes
+
+                _user['inodes'] = get_inodes(_user['plan'], _user['quota'])
+                users_list.append(_user)
+
+    except PermissionError:
+        print('Cannot access a users data directory!')
+        exit(1)
+    except KeyError:
+        pass
+
+    return users_list
+
+
+def set_ceph_quota():
+    _ceph_max_b = 'ceph.quota.max_bytes'
+    _ceph_max_f = 'ceph.quota.max_files'
+    for user in collect_users_data():
+        for path in get_quota_dirs():
+            _u_path = path + '/' + user['username']
+            if config[path]['type'] == 'dynamic':
+                _m_quota = xattr.getxattr(_u_path, _ceph_max_b)
+                _m_inodes = xattr.getxattr(_u_path, _ceph_max_f)
+
+                if int(user['quota_bytes']) != int(_m_quota):
+                    set_quota(_u_path, _ceph_max_b, user['quota_bytes'])
+
+                if int(user['inodes']) != int(_m_inodes):
+                    set_quota(_u_path, _ceph_max_f, user['inodes'])
+
+                save_quota_data(_u_path, user)
+            else:
+                _m_quota = xattr.getxattr(_u_path, _ceph_max_b)
+                _m_inodes = xattr.getxattr(_u_path, _ceph_max_f)
+                _p_quota = config[path]['quota']
+                _p_inodes = config[path]['inodes']
+
+                if int(_p_quota) != int(_m_quota):
+                    set_quota(_u_path, _ceph_max_b, _p_quota)
+
+                if int(_p_inodes) != int(_m_inodes):
+                    set_quota(_u_path, _ceph_max_f, _p_inodes)
+
+set_ceph_quota()
