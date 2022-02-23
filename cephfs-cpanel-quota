@@ -8,8 +8,14 @@ from math import floor
 from pathlib import Path
 from configparser import SafeConfigParser
 
+config_file = '/etc/ceph-quota.ini'
+
+if not os.path.isfile(config_file):
+    print('Cannot find ' + config_file + ' file')
+    exit(1)
+
 config = SafeConfigParser(allow_no_value=True)
-config.read('/etc/ceph-quota.ini')
+config.read(config_file)
 
 
 def get_quota_dirs():
@@ -40,10 +46,19 @@ def file_owner_group(file_path):
 
 
 def get_inodes(plan, quota):
+    _inodes = config['main']['default_inodes']
+    _quota_mb = int(quota) / 1024
+
     if plan in config['plans']:
         _inodes = config['plans'][plan]
     else:
-        _inodes = floor(int(quota) * float(config['main']['inodes_modifier']))
+        for (quota_range, value) in config.items('inodes'):
+            _r_start = int(quota_range.split('-')[0])
+            _r_end = int(quota_range.split('-')[1])
+
+            if _quota_mb in range(_r_start, _r_end):
+                _inodes = value
+
     return _inodes
 
 
