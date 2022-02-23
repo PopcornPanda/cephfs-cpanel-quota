@@ -3,6 +3,7 @@ import os
 import re
 import xattr
 import shutil
+import psutil
 from json import dumps as j_dump
 from math import floor
 from pathlib import Path
@@ -23,9 +24,21 @@ def get_quota_dirs():
 
     for section in config.sections():
         if '/' in section:
-            _dirs.append(section)
+            if os.path.ismount(section):
+                if get_fstype(section) == 'ceph':
+                    _dirs.append(section)
+                else:
+                    print('Skipped: ' + section + ' is not a CephFS!')
+            else:
+                print('Skipped: ' + section + ' is not a mount point!')
 
     return _dirs
+
+
+def get_fstype(path):
+    for part in psutil.disk_partitions(all=True):
+        if part.mountpoint == path:
+            return part.fstype
 
 
 def lift_quota(path):
@@ -138,8 +151,10 @@ def collect_users_data():
 def set_ceph_quota():
     _ceph_max_b = 'ceph.quota.max_bytes'
     _ceph_max_f = 'ceph.quota.max_files'
+    _quota_paths = get_quota_dirs()
+
     for user in collect_users_data():
-        for path in get_quota_dirs():
+        for path in _quota_paths:
             _u_path = path + '/' + user['username']
             if config[path]['type'] == 'dynamic':
                 _m_quota = xattr.getxattr(_u_path, _ceph_max_b)
