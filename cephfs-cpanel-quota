@@ -35,6 +35,15 @@ def get_quota_dirs():
     return _dirs
 
 
+def get_cur_quota(path,limit):
+    try: 
+        _quota = int(xattr.getxattr(path, limit))
+    except KeyError:
+        _quota = 0
+
+    return _quota
+
+
 def get_fstype(path):
     for part in psutil.disk_partitions(all=True):
         if part.mountpoint == path:
@@ -88,8 +97,8 @@ def save_quota_data(path, user):
         Path(_quota_file).touch(mode=0o600, exist_ok=True)
         shutil.chown(_quota_file, user['username'], user['username'])
 
-    _cur_b = int(xattr.getxattr(path, 'ceph.dir.rbytes'))
-    _cur_f = int(xattr.getxattr(path, 'ceph.dir.rentries'))
+    _cur_b = get_cur_quota(path, 'ceph.dir.rbytes')
+    _cur_f = get_cur_quota(path, 'ceph.dir.rentries')
     _m_b = int(user['quota_bytes'])
     _m_f = int(user['inodes'])
     _d_b = _m_b - _cur_b
@@ -157,8 +166,8 @@ def set_ceph_quota():
         for path in _quota_paths:
             _u_path = path + '/' + user['username']
             if config[path]['type'] == 'dynamic':
-                _m_quota = xattr.getxattr(_u_path, _ceph_max_b)
-                _m_inodes = xattr.getxattr(_u_path, _ceph_max_f)
+                _m_quota = get_cur_quota(_u_path, _ceph_max_b)
+                _m_inodes = get_cur_quota(_u_path, _ceph_max_f)
 
                 if int(user['quota_bytes']) != int(_m_quota):
                     set_quota(_u_path, _ceph_max_b, user['quota_bytes'])
@@ -168,8 +177,8 @@ def set_ceph_quota():
 
                 save_quota_data(_u_path, user)
             else:
-                _m_quota = xattr.getxattr(_u_path, _ceph_max_b)
-                _m_inodes = xattr.getxattr(_u_path, _ceph_max_f)
+                _m_quota = get_cur_quota(_u_path, _ceph_max_b)
+                _m_inodes = get_cur_quota(_u_path, _ceph_max_f)
                 _p_quota = config[path]['quota']
                 _p_inodes = config[path]['inodes']
 
