@@ -93,7 +93,11 @@ def iec(size, is_bytes=True):
     else:
         size_name = ("", "K", "M", "G", "T", "P", "E", "Z", "Y")
 
-    i = int(math.floor(math.log(size, 1024)))
+    if is_bytes:
+        i = int(math.floor(math.log(size, 1024)))
+    else:
+        i = int(math.floor(math.log(size, 1000)))
+
     p = math.pow(1024, i)
     s = round(size / p, 2)
     return '%s%s' % ('{0:g}'.format(s), size_name[i])
