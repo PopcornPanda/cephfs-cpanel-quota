@@ -223,6 +223,11 @@ def get_user_utilization(user):
 
     return _user_data
 
+if os.geteuid() != 0:
+    print("Script not started as root. Running sudo..")
+    args = ['sudo', sys.executable] + sys.argv + [os.environ]
+    os.execlpe('sudo', *args)
+
 tab_print(get_user_utilization(args.user))
 if args.blame:
     tab_print(subdirs_usage(args.user, args.depth))
