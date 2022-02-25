@@ -8,6 +8,8 @@ Script is somehow optimized, it doesn't send a setxattr command if quota doesn't
 - Modify `ceph-quota.ini` to better resamble Your needs and configuration
 - Save `cephfs-cpanel-quota` as local binary i.e. in `/usr/local/bin`
 - Add executable permision for `cephfs-cpanel-quota`
+- Save `cephfs-quota` as local binary i.e. in `/usr/local/bin`
+- Add executable permision for `cephfs-quota`
 - Run pip/pip3 install -r /path/to/requirements.txt
 - Setup cron job for `cephfs-cpanel-quota`
 
@@ -20,7 +22,6 @@ sys     0m0.382s
 
 ## TODO
 - Make `repquota` drop-in replacement for tricking WHM to get quota data from CephFS (for now, WHM doesn't show right information about disk usage)
-- Make `quota` equivalent for checking user quota in CLI. I've prototype in bash and need to rewrite it to python.
 
 ## Knonw Issues
 The following list is more about cPanel issues with CephFS than with this script:

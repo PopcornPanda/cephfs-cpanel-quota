@@ -32,11 +32,16 @@ def get_quota_dirs():
             else:
                 print('Skipped: ' + section + ' is not a mount point!')
 
-    return _dirs
+    if _dirs:
+        return _dirs
+    else:
+        print('No valid CephFS share was found!')
+        print('Check config file and mount points in system!')
+        exit(1)
 
 
-def get_cur_quota(path,limit):
-    try: 
+def get_cur_quota(path, limit):
+    try:
         _quota = int(xattr.getxattr(path, limit))
     except KeyError:
         _quota = 0

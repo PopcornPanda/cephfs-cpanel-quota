@@ -1,0 +1,228 @@
+#!/usr/bin/env python3
+import os
+import pwd
+import sys
+import glob
+import math
+import re
+from xattr import getxattr
+import psutil
+import argparse
+from configparser import SafeConfigParser
+from tabulate import tabulate
+
+config_file = '/etc/ceph-quota.ini'
+
+if not os.path.isfile(config_file):
+    print('Cannot find ' + config_file + ' file')
+    exit(1)
+
+
+class MyParser(argparse.ArgumentParser):
+    def error(self, message):
+        sys.stderr.write('error: %s\n' % message)
+        self.print_help()
+        sys.exit(2)
+
+
+config = SafeConfigParser(allow_no_value=True)
+config.read(config_file)
+
+parser = MyParser(
+                                description='CephFS quota utility',
+                                prog='cephfs-quota',
+                                usage='%(prog)s [options]')
+parser.add_argument('user',
+                    metavar='USERNAME', type=str,
+                    help='The user name for which the quota is to be checked')
+parser.add_argument('-b', '--blame',
+                    help='Show list of subdirectories sorted by utilization',
+                    default=False, required=False,
+                    action='store_true')
+parser.add_argument('-R', '--raw',
+                    help='Show quota info in raw (bytes) data',
+                    default=False, required=False,
+                    action='store_true')
+parser.add_argument('-d', '--depth',
+                    metavar='N',
+                    type=int, default=1,
+                    help='Depth of subdirectories to check by BLAME option',
+                    required=False)
+parser.add_argument('-r', '--results',
+                    metavar='N',
+                    type=int, default=5,
+                    help='Number of results returned by BLAME option',
+                    required=False)
+args = parser.parse_args()
+
+
+def progress(count, total=100):
+
+    if count <= 20.0:
+        color = '\33[92m'
+    elif count <= 40.0:
+        color = '\33[94m'
+    elif count <= 70.0:
+        color = '\33[93m'
+    else:
+        color = '\33[91m'
+
+    c_end = '\33[0m'
+
+    bar_len = 10
+    if count > total:
+        filled_len = bar_len
+    else:
+        filled_len = int(round(bar_len * count / float(total)))
+
+    percents = round(100.0 * count / float(total), 1)
+    bar = color + '█' * filled_len + c_end + '-' * (bar_len - filled_len)
+
+    return '[%s] %s%s' % (bar, percents, '%')
+
+
+def iec(size, is_bytes=True):
+    if size == 0:
+        if is_bytes:
+            return "0B"
+        else:
+            return "0"
+
+    if is_bytes:
+        size_name = ("B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB")
+    else:
+        size_name = ("", "K", "M", "G", "T", "P", "E", "Z", "Y")
+
+    i = int(math.floor(math.log(size, 1024)))
+    p = math.pow(1024, i)
+    s = round(size / p, 2)
+    return '%s%s' % ('{0:g}'.format(s), size_name[i])
+
+
+def get_cur_quota(path, limit):
+    try:
+        _quota = int(getxattr(path, limit))
+    except IOError:
+        _quota = 0
+
+    return _quota
+
+
+def subdirs_usage(user, depth):
+    _sdir_data = []
+    for path in get_quota_dirs():
+        _u_path = path + '/' + user
+        if os.path.isdir(_u_path):
+            _rbytes = 'ceph.dir.rbytes'
+            _files = 'ceph.dir.rentries'
+            _s_list = glob.glob(_u_path + depth * '/*')
+            _exclude = config['main']['blame_exclude']
+            _f_list = filter(lambda x: not re.search(_exclude, x), _s_list)
+
+            for sdir in _f_list:
+                try:
+                    if os.path.isdir(sdir) and not os.path.islink(sdir):
+                        _sdata = {}
+                        _sdata['Largest subdirectories'] = sdir
+                        _sdir_bytes = get_cur_quota(sdir, _rbytes)
+                        _sdir_files = get_cur_quota(sdir, _files)
+                        _sdata['Space'] = _sdir_bytes
+                        _sdata['Files'] = _sdir_files
+                        _sdir_data.append(_sdata)
+                except IOError:
+                    pass
+
+    _sorted = sorted(_sdir_data, key=lambda d: d['Space'],
+                     reverse=True)[:args.results]
+    if not args.raw:
+        for _subdir in _sorted:
+            _subdir['Space'] = iec(_subdir['Space'])
+            _subdir['Files'] = iec(_subdir['Files'], False)
+
+    return _sorted
+
+
+def get_quota_dirs():
+    _dirs = []
+
+    for section in config.sections():
+        if '/' in section:
+            if os.path.ismount(section):
+                if get_fstype(section) == 'ceph':
+                    _dirs.append(section)
+                else:
+                    print('Skipped: ' + section + ' is not a CephFS!')
+            else:
+                print('Skipped: ' + section + ' is not a mount point!')
+    if _dirs:
+        return _dirs
+    else:
+        print('No valid CephFS share was found!')
+        print('Check config file and mount points in system!')
+        exit(1)
+
+
+def get_fstype(path):
+    for part in psutil.disk_partitions(all=True):
+        if part.mountpoint == path:
+            return part.fstype
+
+
+def user_exist(user):
+    try:
+        pwd.getpwnam(user)
+    except KeyError:
+        print('User ' + user + ' does not exist.')
+        return False
+
+    return True
+
+
+def tab_print(data):
+    print(tabulate(data, headers="keys",
+                   tablefmt="fancy_grid", floatfmt=(".1f")))
+
+
+def percent(x, y):
+    try:
+        return (x / y) * 100
+    except ZeroDivisionError:
+        return 0
+
+
+def get_user_utilization(user):
+    _rbytes = 'ceph.dir.rbytes'
+    _files = 'ceph.dir.rentries'
+    _max_bytes = 'ceph.quota.max_bytes'
+    _max_files = 'ceph.quota.max_files'
+    _user_data = []
+
+    if user_exist(user):
+        for path in get_quota_dirs():
+            _u_path = path + '/' + user
+            if os.path.isdir(_u_path):
+                _data = {}
+                _data['Path'] = _u_path
+                _d_bytes = get_cur_quota(_u_path, _rbytes)
+                _d_files = get_cur_quota(_u_path, _files)
+                _m_bytes = get_cur_quota(_u_path, _max_bytes)
+                _m_files = get_cur_quota(_u_path, _max_files)
+                if args.raw:
+                    _data['Used Space'] = _d_bytes
+                    _data['Used Files'] = _d_files
+                    _data['Space Limit'] = _m_bytes
+                    _data['Files Limit'] = _m_files
+                else:
+                    _data['Used Space'] = iec(_d_bytes)
+                    _data['Used Files'] = iec(_d_files, False)
+                    _data['Space Limit'] = iec(_m_bytes)
+                    _data['Files Limit'] = iec(_m_files, False)
+                _data['Space Usage'] = progress(percent(_d_bytes, _m_bytes))
+                _data['Files Usage'] = progress(percent(_d_files, _m_files))
+                _user_data.append(_data)
+
+    return _user_data
+
+tab_print(get_user_utilization(args.user))
+if args.blame:
+    tab_print(subdirs_usage(args.user, args.depth))
