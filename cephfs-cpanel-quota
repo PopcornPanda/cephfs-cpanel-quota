@@ -139,7 +139,7 @@ def collect_users_data():
             except KeyError:
                 continue
 
-            if _group_owner == _user['username']:
+            if _group_owner == _user['username'] and _group_owner != 'root':
                 if _user['username'] in config['exclude']:
                     _user['plan'] = 'SKIP'
                     _user['quota'] = 0
