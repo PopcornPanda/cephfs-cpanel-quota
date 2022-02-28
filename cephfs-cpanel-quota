@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import os
 import re
-import xattr
 import shutil
 import psutil
 from json import dumps as j_dump
@@ -42,8 +41,8 @@ def get_quota_dirs():
 
 def get_cur_quota(path, limit):
     try:
-        _quota = int(xattr.getxattr(path, limit))
-    except KeyError:
+        _quota = int(os.getxattr(path, limit))
+    except IOError:
         _quota = 0
 
     return _quota
@@ -56,12 +55,12 @@ def get_fstype(path):
 
 
 def lift_quota(path):
-    xattr.setxattr(str(path), 'ceph.quota.max_bytes', bytes('0', 'ascii'))
-    xattr.setxattr(str(path), 'ceph.quota.max_files', bytes('0', 'ascii'))
+    os.setxattr(str(path), 'ceph.quota.max_bytes', bytes('0', 'ascii'))
+    os.setxattr(str(path), 'ceph.quota.max_files', bytes('0', 'ascii'))
 
 
 def set_quota(path, key, value):
-    xattr.setxattr(str(path), key, bytes(str(value), 'ascii'))
+    os.setxattr(str(path), key, bytes(str(value), 'ascii'))
 
 
 def get_cpanel_value(value):
@@ -90,18 +89,6 @@ def get_inodes(plan, quota):
 
 
 def save_quota_data(path, user):
-    _filename = '_Cpanel::Quota.pm__' + user['username']
-    _data_path = path + '/.cpanel/datastore/'
-    _quota_file = _data_path + _filename
-
-    if not os.path.isdir(_data_path):
-        os.makedirs(_data_path, mode=0o700, exist_ok=True)
-        shutil.chown(_data_path, user['username'], user['username'])
-
-    if not os.path.isfile(_quota_file):
-        Path(_quota_file).touch(mode=0o600, exist_ok=True)
-        shutil.chown(_quota_file, user['username'], user['username'])
-
     _cur_b = get_cur_quota(path, 'ceph.dir.rbytes')
     _cur_f = get_cur_quota(path, 'ceph.dir.rentries')
     _m_b = int(user['quota_bytes'])
@@ -111,14 +98,30 @@ def save_quota_data(path, user):
     _v = "VERSION"
     _json = {"data": [_cur_b, _m_b, _d_b, _cur_f, _m_f, _d_f], _v: "2.4"}
 
-    try:
-        with open(_quota_file, 'w') as file_content:
-            file_content.write(j_dump(_json))
+    if _cur_b >= _m_b or _cur_f >= _m_f:
+        _lift = True
+    else:
+        _lift = False
 
-    except IOError:
+    _filename = '_Cpanel::Quota.pm__' + user['username']
+    _data_path = path + '/.cpanel/datastore/'
+    _quota_file = _data_path + _filename
+
+    if _lift:
         lift_quota(path)
-        with open(_quota_file, 'w') as file_content:
-            file_content.write(j_dump(_json))
+
+    if not os.path.isdir(_data_path):
+        os.makedirs(_data_path, mode=0o700, exist_ok=True)
+        shutil.chown(_data_path, user['username'], user['username'])
+
+    if not os.path.isfile(_quota_file):
+        Path(_quota_file).touch(mode=0o600, exist_ok=True)
+        shutil.chown(_quota_file, user['username'], user['username'])
+
+    with open(_quota_file, 'w') as file_content:
+        file_content.write(j_dump(_json))
+
+    if _lift:
         set_quota(path, 'ceph.quota.max_bytes', _m_b)
         set_quota(path, 'ceph.quota.max_files', _m_f)
 
@@ -131,7 +134,12 @@ def collect_users_data():
             _user['username'] = user_file
             full_path = config['main']['cpanel_user_dir'] + '/' + user_file
 
-            if file_owner_group(full_path) == _user['username']:
+            try:
+                _group_owner = file_owner_group(full_path)
+            except KeyError:
+                continue
+
+            if _group_owner == _user['username']:
                 if _user['username'] in config['exclude']:
                     _user['plan'] = 'SKIP'
                     _user['quota'] = 0
@@ -156,8 +164,6 @@ def collect_users_data():
     except PermissionError:
         print('Cannot access a users data directory!')
         exit(1)
-    except KeyError:
-        pass
 
     return users_list
 
