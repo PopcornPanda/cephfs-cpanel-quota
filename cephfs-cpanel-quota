@@ -55,12 +55,14 @@ def get_fstype(path):
 
 
 def lift_quota(path):
-    os.setxattr(str(path), 'ceph.quota.max_bytes', bytes('0', 'ascii'))
-    os.setxattr(str(path), 'ceph.quota.max_files', bytes('0', 'ascii'))
+    if os.path.isdir(path):
+        os.setxattr(str(path), 'ceph.quota.max_bytes', bytes('0', 'ascii'))
+        os.setxattr(str(path), 'ceph.quota.max_files', bytes('0', 'ascii'))
 
 
 def set_quota(path, key, value):
-    os.setxattr(str(path), key, bytes(str(value), 'ascii'))
+    if os.path.isdir(path):
+        os.setxattr(str(path), key, bytes(str(value), 'ascii'))
 
 
 def get_cpanel_value(value):
@@ -136,7 +138,11 @@ def collect_users_data():
 
             try:
                 _group_owner = file_owner_group(full_path)
+
             except KeyError:
+                continue
+
+            if full_path.endswith('.lock'):
                 continue
 
             if _group_owner == _user['username'] and _group_owner != 'root':
@@ -158,8 +164,12 @@ def collect_users_data():
                                 quota_in_bytes = int(_user['quota']) * 1024
                                 _user['quota_bytes'] = quota_in_bytes
 
-                _user['inodes'] = get_inodes(_user['plan'], _user['quota'])
-                users_list.append(_user)
+                try:
+                    _user['inodes'] = get_inodes(_user['plan'], _user['quota'])
+                    users_list.append(_user)
+
+                except KeyError:
+                    continue
 
     except PermissionError:
         print('Cannot access a users data directory!')
