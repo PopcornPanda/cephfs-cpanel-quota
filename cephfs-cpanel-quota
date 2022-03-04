@@ -8,6 +8,7 @@ from math import floor
 from pathlib import Path
 from configparser import SafeConfigParser
 
+repquota_cache = []
 config_file = '/etc/ceph-quota.ini'
 
 if not os.path.isfile(config_file):
@@ -16,7 +17,7 @@ if not os.path.isfile(config_file):
 
 config = SafeConfigParser(allow_no_value=True)
 config.read(config_file)
-
+repquota_file = config['main']['repquota_cache']
 
 def get_quota_dirs():
     _dirs = []
@@ -90,6 +91,11 @@ def get_inodes(plan, quota):
     return _inodes
 
 
+def save_repquota_cache():
+    with open(repquota_file, "w") as cachefile:
+        cachefile.write("\n".join(repquota_cache))
+
+
 def save_quota_data(path, user):
     _cur_b = get_cur_quota(path, 'ceph.dir.rbytes')
     _cur_f = get_cur_quota(path, 'ceph.dir.rentries')
@@ -99,6 +105,13 @@ def save_quota_data(path, user):
     _d_f = _m_f - _cur_f
     _v = "VERSION"
     _json = {"data": [_cur_b, _m_b, _d_b, _cur_f, _m_f, _d_f], _v: "2.4"}
+
+    _m_kb = str(int(_m_b/1024))
+    _cur_kb = str(int(_cur_b/1024))
+    _rquota = (user['username'] +
+               "\t" + "--\t" + _cur_kb + ("\t" + _m_kb)*2 +
+               "\t" + str(_cur_f) + ("\t" + str(_m_f))*2)
+    repquota_cache.append(_rquota)
 
     if _cur_b >= _m_b or _cur_f >= _m_f:
         _lift = True
@@ -210,3 +223,4 @@ def set_ceph_quota():
                     set_quota(_u_path, _ceph_max_f, _p_inodes)
 
 set_ceph_quota()
+save_repquota_cache()

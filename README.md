@@ -20,8 +20,6 @@ user    0m1.090s
 sys     0m0.382s
 ```
 
-## TODO
-- Make `repquota` drop-in replacement for tricking WHM to get quota data from CephFS (for now, WHM doesn't show right information about disk usage)
 
 ## Knonw Issues
 The following list is more about cPanel issues with CephFS than with this script:
