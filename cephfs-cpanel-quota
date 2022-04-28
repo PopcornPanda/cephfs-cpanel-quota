@@ -19,6 +19,7 @@ config = SafeConfigParser(allow_no_value=True)
 config.read(config_file)
 repquota_file = config['main']['repquota_cache']
 
+
 def get_quota_dirs():
     _dirs = []
 
@@ -209,7 +210,15 @@ def set_ceph_quota():
                 if int(user['inodes']) != int(_m_inodes):
                     set_quota(_u_path, _ceph_max_f, user['inodes'])
 
-                save_quota_data(_u_path, user)
+                try:
+                    save_quota_data(_u_path, user)
+
+                except LookupError:
+                    continue
+
+                except OSError:
+                    continue
+
             else:
                 _m_quota = get_cur_quota(_u_path, _ceph_max_b)
                 _m_inodes = get_cur_quota(_u_path, _ceph_max_f)
