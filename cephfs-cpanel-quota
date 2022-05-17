@@ -64,7 +64,10 @@ def lift_quota(path):
 
 def set_quota(path, key, value):
     if os.path.isdir(path):
-        os.setxattr(str(path), key, bytes(str(value), 'ascii'))
+        try:
+            os.setxattr(str(path), key, bytes(str(value), 'ascii'))
+        except OSError:
+            pass
 
 
 def get_cpanel_value(value):
