@@ -52,6 +52,10 @@ parser.add_argument('-r', '--results',
                     type=int, default=5,
                     help='Number of results returned by BLAME option',
                     required=False)
+parser.add_argument('-f', '--files',
+                    help='Sort Blame result by files instead of space',
+                    default=False, required=False,
+                    action='store_true')
 args = parser.parse_args()
 
 
@@ -136,8 +140,13 @@ def subdirs_usage(user, depth):
                 except IOError:
                     pass
 
-    _sorted = sorted(_sdir_data, key=lambda d: d['Space'],
+    if args.files:
+        _sorted = sorted(_sdir_data, key=lambda d: d['Files'],
                      reverse=True)[:args.results]
+    else:
+        _sorted = sorted(_sdir_data, key=lambda d: d['Space'],
+                     reverse=True)[:args.results]
+
     if not args.raw:
         for _subdir in _sorted:
             _subdir['Space'] = iec(_subdir['Space'])
