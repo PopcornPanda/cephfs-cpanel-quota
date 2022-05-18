@@ -123,7 +123,8 @@ def subdirs_usage(user, depth):
         if os.path.isdir(_u_path):
             _rbytes = 'ceph.dir.rbytes'
             _files = 'ceph.dir.rentries'
-            _s_list = glob.glob(_u_path + depth * '/*')
+            _s_list = glob.glob(_u_path + depth * '/*') 
+            _s_list += glob.glob(_u_path + depth * '/.*')
             _exclude = config['main']['blame_exclude']
             _f_list = filter(lambda x: not re.search(_exclude, x), _s_list)
 
