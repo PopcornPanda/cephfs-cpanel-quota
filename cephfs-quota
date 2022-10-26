@@ -9,6 +9,7 @@ import psutil
 import argparse
 from configparser import SafeConfigParser
 from tabulate import tabulate
+from enum import Enum
 
 config_file = '/etc/ceph-quota.ini'
 
@@ -16,6 +17,34 @@ if not os.path.isfile(config_file):
     print('Cannot find ' + config_file + ' file')
     exit(1)
 
+class Types(str, Enum):
+    files = 'files'
+    space = 'space'
+    used = 'used'
+    usage = 'usage'
+    limit = 'limit'
+    path = 'path'
+
+    def __str__(self):
+        return self.value
+
+class Shorts(str, Enum):
+    space = 'Used Space'
+    files = 'Used Files'
+    space_usage = 'Space Usage'
+    files_usage = 'Files Usage'
+    space_limit = 'Space Limit'
+    files_limit = 'Files Limit' 
+
+    def __str__(self):
+        return self.name
+
+    @staticmethod
+    def from_string(s):
+        try:
+            return Shorts[s]
+        except KeyError:
+            raise ValueError()
 
 class MyParser(argparse.ArgumentParser):
     def error(self, message):
@@ -42,6 +71,14 @@ parser.add_argument('-R', '--raw',
                     help='Show quota info in raw (bytes) data',
                     default=False, required=False,
                     action='store_true')
+parser.add_argument('--short',
+                    type=Shorts.from_string, choices=list(Shorts),
+                    help='Show only requested value',
+                    default=None, required=False, nargs='+')
+parser.add_argument('-s', '--select',
+                    type=Types, choices=list(Types),
+                    help='Show only requested quota info',
+                    default=None, required=False, nargs='+')
 parser.add_argument('-d', '--depth',
                     metavar='N',
                     type=int, default=1,
@@ -153,6 +190,12 @@ def subdirs_usage(user, depth):
             _subdir['Space'] = iec(_subdir['Space'])
             _subdir['Files'] = iec(_subdir['Files'], False)
 
+        if args.select:
+            pattern = re.compile('|'.join(args.select), re.IGNORECASE)
+            keys = {key for key, value in _sorted.items() if not pattern.findall(key)}
+            for key in keys:
+                _sorted.pop(key, None)
+
     return _sorted
 
 
@@ -233,6 +276,13 @@ def get_user_utilization(user):
                     _data['Files Limit'] = iec(_m_files, False)
                 _data['Space Usage'] = progress(percent(_d_bytes, _m_bytes))
                 _data['Files Usage'] = progress(percent(_d_files, _m_files))
+
+                if args.select:
+                    pattern = re.compile('|'.join(args.select), re.IGNORECASE)
+                    keys = {key for key, value in _data.items() if not pattern.findall(key)}
+                    for key in keys:
+                        _data.pop(key, None)
+
                 _user_data.append(_data)
 
     return _user_data
@@ -242,6 +292,18 @@ if os.geteuid() != 0:
     args = ['sudo', sys.executable] + sys.argv + [os.environ]
     os.execlpe('sudo', *args)
 
-tab_print(get_user_utilization(args.user))
+if args.short:
+    for item in args.short:
+        print(get_user_utilization(args.user)[0][item.value])
+else:
+    tab_print(get_user_utilization(args.user))
 if args.blame:
-    tab_print(subdirs_usage(args.user, args.depth))
+    if args.short:
+        for item in args.short:
+            for _sdir in subdirs_usage(args.user, args.depth):
+                if re.findall('Space', item):
+                    print("%s %s" % (_sdir['Largest subdirectories'],_sdir[re.findall('Space', item)[0]]))
+                else:
+                    print("%s %s" % (_sdir['Largest subdirectories'],_sdir[re.findall('Files', item)[0]]))
+    else:
+        tab_print(subdirs_usage(args.user, args.depth))
