@@ -22,10 +22,11 @@ for p in psutil.disk_partitions(all=True):
     if 'ceph' in p.fstype:
         is_ceph = True
         break
-    if not is_ceph:
-        print('No valid CephFS share was found!')
-        print('Check config file and mount points in system!')
-        exit(1)
+        
+if not is_ceph:
+    print('No valid CephFS share was found!')
+    print('Check config file and mount points in system!')
+    exit(1)
 
 
 class Types(str, Enum):
