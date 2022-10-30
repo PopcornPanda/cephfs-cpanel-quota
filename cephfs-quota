@@ -7,12 +7,16 @@ import math
 import re
 import psutil
 import argparse
-from configparser import SafeConfigParser
+from configparser import ConfigParser
 from tabulate import tabulate
 from enum import Enum
 
 config_file = '/etc/ceph-quota.ini'
 is_ceph = False
+_rbytes = 'ceph.dir.rbytes'
+_files = 'ceph.dir.rentries'
+_max_bytes = 'ceph.quota.max_bytes'
+_max_files = 'ceph.quota.max_files'
 
 if not os.path.isfile(config_file):
     print('Cannot find ' + config_file + ' file')
@@ -22,10 +26,10 @@ for p in psutil.disk_partitions(all=True):
     if 'ceph' in p.fstype:
         is_ceph = True
         break
-    if not is_ceph:
-        print('No valid CephFS share was found!')
-        print('Check config file and mount points in system!')
-        exit(1)
+if not is_ceph:
+    print('No valid CephFS share was found!')
+    print('Check config file and mount points in system!')
+    exit(1)
 
 
 class Types(str, Enum):
@@ -64,7 +68,7 @@ class MyParser(argparse.ArgumentParser):
         sys.exit(2)
 
 
-config = SafeConfigParser(allow_no_value=True)
+config = ConfigParser(allow_no_value=True)
 config.read(config_file)
 
 parser = MyParser(
@@ -76,8 +80,7 @@ parser.add_argument('user',
                     help='The user name for which the quota is to be checked')
 parser.add_argument('-b', '--blame',
                     help='Show list of subdirectories sorted by utilization',
-                    default=False, required=False,
-                    action='store_true')
+                    default=None, required=False, choices=['space', 'files'])
 parser.add_argument('-R', '--raw',
                     help='Show quota info in raw (bytes) data',
                     default=False, required=False,
@@ -100,12 +103,8 @@ parser.add_argument('-r', '--results',
                     type=int, default=5,
                     help='Number of results returned by BLAME option',
                     required=False)
-parser.add_argument('-f', '--files',
-                    help='Sort Blame result by files instead of space',
-                    default=False, required=False,
-                    action='store_true')
+                    
 args = parser.parse_args()
-
 
 def progress(count, total=100):
 
@@ -132,27 +131,30 @@ def progress(count, total=100):
     return '[%s] %s%s' % (bar, percents, '%')
 
 
-def iec(size, is_bytes=True):
-    if size == 0:
+def pretty(size, is_bytes=True, convert=True):
+    if convert:
+        if size == 0:
+            if is_bytes:
+                return "0B"
+            else:
+                return "0"
+
         if is_bytes:
-            return "0B"
+            size_name = ("B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB")
         else:
-            return "0"
+            size_name = ("", "K", "M", "G", "T", "P", "E", "Z", "Y")
 
-    if is_bytes:
-        size_name = ("B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB")
+        if is_bytes:
+            i = int(math.floor(math.log(size, 1024)))
+            p = math.pow(1024, i)
+        else:
+            i = int(math.floor(math.log(size, 1000)))
+            p = math.pow(1000, i)
+
+        s = round(size / p, 2)
+        return '%s%s' % ('{0:g}'.format(s), size_name[i])
     else:
-        size_name = ("", "K", "M", "G", "T", "P", "E", "Z", "Y")
-
-    if is_bytes:
-        i = int(math.floor(math.log(size, 1024)))
-        p = math.pow(1024, i)
-    else:
-        i = int(math.floor(math.log(size, 1000)))
-        p = math.pow(1000, i)
-
-    s = round(size / p, 2)
-    return '%s%s' % ('{0:g}'.format(s), size_name[i])
+        return size
 
 
 def get_cur_quota(path, limit):
@@ -169,8 +171,6 @@ def subdirs_usage(user, depth):
     for path in get_quota_dirs():
         _u_path = path + '/' + user
         if os.path.isdir(_u_path):
-            _rbytes = 'ceph.dir.rbytes'
-            _files = 'ceph.dir.rentries'
             _s_list = glob.glob(_u_path + depth * '/*') 
             _s_list += glob.glob(_u_path + depth * '/.*')
             _exclude = config['main']['blame_exclude']
@@ -189,7 +189,7 @@ def subdirs_usage(user, depth):
                 except IOError:
                     pass
 
-    if args.files:
+    if args.blame == 'files':
         _sorted = sorted(_sdir_data, key=lambda d: d['Files'],
                      reverse=True)[:args.results]
     else:
@@ -198,8 +198,8 @@ def subdirs_usage(user, depth):
 
     if not args.raw:
         for _subdir in _sorted:
-            _subdir['Space'] = iec(_subdir['Space'])
-            _subdir['Files'] = iec(_subdir['Files'], False)
+            _subdir['Space'] = pretty(_subdir['Space'], convert=True)
+            _subdir['Files'] = pretty(_subdir['Files'], False, True)
 
         if args.select:
             pattern = re.compile('|'.join(args.select), re.IGNORECASE)
@@ -254,10 +254,6 @@ def percent(x, y):
 
 
 def get_user_utilization(user):
-    _rbytes = 'ceph.dir.rbytes'
-    _files = 'ceph.dir.rentries'
-    _max_bytes = 'ceph.quota.max_bytes'
-    _max_files = 'ceph.quota.max_files'
     _user_data = []
 
     if user_exist(user):
@@ -270,16 +266,11 @@ def get_user_utilization(user):
                 _d_files = get_cur_quota(_u_path, _files)
                 _m_bytes = get_cur_quota(_u_path, _max_bytes)
                 _m_files = get_cur_quota(_u_path, _max_files)
-                if args.raw:
-                    _data['Used Space'] = _d_bytes
-                    _data['Used Files'] = _d_files
-                    _data['Space Limit'] = _m_bytes
-                    _data['Files Limit'] = _m_files
-                else:
-                    _data['Used Space'] = iec(_d_bytes)
-                    _data['Used Files'] = iec(_d_files, False)
-                    _data['Space Limit'] = iec(_m_bytes)
-                    _data['Files Limit'] = iec(_m_files, False)
+
+                _data['Used Space'] = pretty(_d_bytes, convert=args.raw)
+                _data['Used Files'] = pretty(_d_files, False, args.raw)
+                _data['Space Limit'] = pretty(_m_bytes, convert=args.raw)
+                _data['Files Limit'] = pretty(_m_files, False, args.raw)
                 _data['Space Usage'] = progress(percent(_d_bytes, _m_bytes))
                 _data['Files Usage'] = progress(percent(_d_files, _m_files))
 

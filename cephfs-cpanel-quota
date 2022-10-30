@@ -6,7 +6,7 @@ import psutil
 from json import dumps as j_dump
 from math import floor
 from pathlib import Path
-from configparser import SafeConfigParser
+from configparser import ConfigParser
 
 repquota_cache = []
 config_file = '/etc/ceph-quota.ini'
@@ -15,7 +15,7 @@ if not os.path.isfile(config_file):
     print('Cannot find ' + config_file + ' file')
     exit(1)
 
-config = SafeConfigParser(allow_no_value=True)
+config = ConfigParser(allow_no_value=True)
 config.read(config_file)
 repquota_file = config['main']['repquota_cache']
 
