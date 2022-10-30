@@ -12,10 +12,21 @@ from tabulate import tabulate
 from enum import Enum
 
 config_file = '/etc/ceph-quota.ini'
+is_ceph = False
 
 if not os.path.isfile(config_file):
     print('Cannot find ' + config_file + ' file')
     exit(1)
+
+for p in psutil.disk_partitions(all=True):
+    if 'ceph' in p.fstype:
+        is_ceph = True
+        break
+    if not is_ceph:
+        print('No valid CephFS share was found!')
+        print('Check config file and mount points in system!')
+        exit(1)
+
 
 class Types(str, Enum):
     files = 'files'
@@ -208,15 +219,10 @@ def get_quota_dirs():
                 if get_fstype(section) == 'ceph':
                     _dirs.append(section)
                 else:
-                    print('Skipped: ' + section + ' is not a CephFS!')
+                    print(f'Skipped: {section} is not a CephFS!')
             else:
-                print('Skipped: ' + section + ' is not a mount point!')
-    if _dirs:
-        return _dirs
-    else:
-        print('No valid CephFS share was found!')
-        print('Check config file and mount points in system!')
-        exit(1)
+                print(f'Skipped: {section} is not a mount point!')
+    return _dirs
 
 
 def get_fstype(path):
